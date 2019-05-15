@@ -17,6 +17,7 @@ resource_types:
     source:
       repository: dpb587/github-status-resource
       tag: master
+    check_every: 24h
 
 resources:
   - name: common-tasks-repo
