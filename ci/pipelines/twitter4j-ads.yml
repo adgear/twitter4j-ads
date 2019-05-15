@@ -1,0 +1,99 @@
+# instance:       concourse.int.adgear.com
+# pipeline_name:  twitter4j-ads
+# team:           data
+---
+resource_types:
+  - name: git-tags-resource
+    type: docker-image
+    source:
+      repository: adgear/git-tags-resource
+      tag: 1.1.2
+  - name: pull-request
+    type: docker-image
+    source:
+      repository: teliaoss/github-pr-resource
+  - name: commit-status
+    type: docker-image
+    source:
+      repository: dpb587/github-status-resource
+      tag: master
+    check_every: 24h
+
+resources:
+  - name: common-tasks-repo
+    type: git
+    source:
+      uri: git@github.com:adgear/common-tasks.git
+      private_key: ((adgear-concourse.ssh_private_key))
+  - name: twitter4j-ads-pr
+    type: pull-request
+    source:
+      repository: adgear/twitter4j-ads
+      access_token: ((adgear-concourse.access_token))
+  - name: twitter4j-ads-tags
+    type: git-tags-resource
+    source:
+      private_key: ((adgear-concourse.ssh_private_key))
+      repository_name: adgear/twitter4j-ads
+      uri: git@github.com:adgear/twitter4j-ads.git
+      tag_filter: "*.*.*"
+  - name: twitter4j-ads-commit-status
+    type: commit-status
+    source:
+      repository:   adgear/twitter4j-ads
+      access_token: ((adgear-concourse.access_token))
+      context: concourse/ci
+
+jobs:
+  - name: build-pr
+    plan:
+      - aggregate:
+        - get: common-tasks-repo
+        - get: twitter4j-ads-pr
+          trigger: true
+          version: every
+      - put: twitter4j-ads-pr
+        params:
+          path:   twitter4j-ads-pr
+          status: pending
+      - task: mvn-build
+        file: common-tasks-repo/mvn-build/latest/mvn-build.yml
+        input_mapping:
+          source: twitter4j-ads-pr
+        params: { EXPORT_VOLUMES: false }
+        on_success:
+          put: twitter4j-ads-pr
+          params:
+            path:   twitter4j-ads-pr
+            status: success
+        on_failure:
+          put: twitter4j-ads-pr
+          params:
+            path:   twitter4j-ads-pr
+            status: failure
+
+  - name: build-tags
+    plan:
+      - aggregate:
+        - get: common-tasks-repo
+        - get: twitter4j-ads-tags
+          trigger: true
+          version: every
+      - do:
+        - task: mvn-build
+          file: common-tasks-repo/mvn-build/latest/mvn-build.yml
+          input_mapping:
+            source: twitter4j-ads-tags
+          params:
+            IS_RELEASE: true
+            EXPORT_VOLUMES: false
+        on_success:
+          put: twitter4j-ads-commit-status
+          params:
+            state:  success
+            commit: twitter4j-ads-tags
+        on_failure:
+          put: twitter4j-ads-commit-status
+          params:
+            state:  failure
+            commit: twitter4j-ads-tags
